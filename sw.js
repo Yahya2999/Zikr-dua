@@ -1,14 +1,43 @@
 // Zikr & Dua — Service Worker
-// Handles background notification display for dhikr/dua reminders.
+// Handles offline caching and background notification display for dhikr/dua reminders.
 
 const CACHE_NAME = 'zikr-dua-v1';
+const CACHED_URLS = [
+  './',
+  './index.html',
+  './manifest.json',
+];
 
 self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(CACHED_URLS)).catch(() => {})
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
+
+// Serve from cache first, fall back to network, so the app works offline
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
+        if (response && response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+        }
+        return response;
+      }).catch(() => cached);
+    })
+  );
 });
 
 // Show a notification when asked to by the main page
@@ -34,7 +63,7 @@ self.addEventListener('notificationclick', (event) => {
       for (const client of clientList) {
         if ('focus' in client) return client.focus();
       }
-      if (self.clients.openWindow) return self.clients.openWindow('/');
+      if (self.clients.openWindow) return self.clients.openWindow('./');
     })
   );
 });
